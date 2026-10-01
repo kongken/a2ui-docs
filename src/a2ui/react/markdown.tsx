@@ -49,7 +49,15 @@ export function isBlockMarkdown(text: string) {
   return /\n|^#{1,6}\s|^[-*]\s|^\d+\.\s/m.test(text)
 }
 
-const H = ["text-2xl font-bold", "text-xl font-semibold", "text-lg font-semibold", "text-base font-semibold", "text-sm font-semibold", "text-sm font-semibold"]
+// 与 v0.9 的 h1–h5 变体保持一致（v1.0 的标题用 Markdown 表达）
+const H = [
+  "text-3xl font-bold tracking-tight",
+  "text-2xl font-semibold tracking-tight",
+  "text-xl font-semibold",
+  "text-lg font-semibold",
+  "text-base font-semibold",
+  "text-sm font-semibold",
+]
 
 type ListState = { ordered: boolean; items: string[] }
 

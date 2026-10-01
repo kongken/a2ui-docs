@@ -9,6 +9,8 @@ import { MessageLog, SurfacePreview } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
 import { useDemo } from "@/components/learn/message-editor"
 import { Bullets, Callout, P, Section, Steps } from "@/components/learn/prose"
+import { VersionNote } from "@/components/learn/version-note"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, fmt, text } from "./msg"
 
@@ -113,6 +115,8 @@ function ActionDemo() {
 }
 
 export default function ActionsLesson() {
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
   return (
     <LessonShell
       slug="actions"
@@ -190,7 +194,7 @@ export default function ActionsLesson() {
           <CodeBlock
             title="客户端 → Agent 的 action 消息"
             code={{
-              version: "v0.9",
+              version: v1 ? "v1.0" : "v0.9",
               action: {
                 name: "submit_signup",
                 surfaceId: "signup",
@@ -201,6 +205,14 @@ export default function ActionsLesson() {
             }}
           />
         </div>
+        <VersionNote when="v1.0" summary="action 可以带 userMessage；数据模型元数据改名为 a2uiRendererDataModel">
+          <Bullets
+            items={[
+              <><C>action.event.userMessage</C>（DynamicString）：一句描述用户做了什么的文字，解析后随 action 发送，方便 Agent 写进对话历史。</>,
+              <>打开 <C>sendDataModel</C> 后，传输元数据里的键在 v0.9 叫 <C>a2uiClientDataModel</C>，在 v1.0 叫 <C>a2uiRendererDataModel</C>，内部的 version 也随之变化。</>,
+            ]}
+          />
+        </VersionNote>
         <Callout tone="info" title="context 里什么时候用 path？">
           只有需要“用户当时的值”时才用 <C>{`{"path": …}`}</C>。像 <C>source</C>、商品 ID 这类固定值直接写字面量即可——规范特别提醒不要为静态 ID 使用路径。
         </Callout>
@@ -224,6 +236,10 @@ export default function ActionsLesson() {
             <><C>functionCall</C>：在客户端本地执行，只能调用 catalog 声明过的函数（如 <C>openUrl</C>）。</>,
           ]}
         />
+        <VersionNote when="v1.0" summary="functionCall 不再局限于本地">
+          v1.0 中，如果 functionCall 调用的函数不在渲染器的 catalog 里，渲染器会把它作为 <C>callAgentFunction</C> 发给 Agent 执行，再等待 <C>agentFunctionResponse</C>。
+          另外 <C>openUrl</C> 在 v1.0 catalog 中声明了 <C>requiresUserActivation: true</C>，只能由用户操作触发。
+        </VersionNote>
       </Section>
     </LessonShell>
   )

@@ -2,15 +2,17 @@ import { useState } from "react"
 import { Bot, RotateCcw, ShieldCheck } from "lucide-react"
 import { cn } from "cn"
 
-import { BASIC_CATALOG_ID, TRAVEL_CATALOG_ID, useA2UI } from "@/a2ui"
+import { BASIC_CATALOG_ID, BASIC_CATALOG_V1_ID, TRAVEL_CATALOG_ID, TRAVEL_CATALOG_V1_ID, useA2UI } from "@/a2ui"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeBlock, C } from "@/components/learn/code-block"
 import { Inspector, MessageLog, SurfacePreview } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
-import { MessageEditor, pretty, useDemo } from "@/components/learn/message-editor"
+import { MessageEditor, pretty, useConverted, useDemo, useVersionedA2UI } from "@/components/learn/message-editor"
 import { Bullets, Callout, P, Section } from "@/components/learn/prose"
+import { ByVersion, VersionNote } from "@/components/learn/version-note"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, text, V } from "./msg"
 
@@ -49,6 +51,26 @@ const flight = (catalogId: string) => [
   data("trip", { flight: { from: "PVG", to: "HND", departs: "08:35", arrives: "12:20" }, hotel: { name: "新宿 Granbell 酒店", score: 4.4 } }),
 ]
 
+const RATING_SCHEMA_V1 = {
+  Rating: {
+    type: "object",
+    description: "星级评分",
+    properties: {
+      component: { const: "Rating" },
+      value: { $ref: "common_types.json#/$defs/DynamicNumber" },
+      max: { type: "number", default: 5 },
+      weight: { type: "number" },
+    },
+    required: ["component", "value"],
+  },
+  FlightSegment: {
+    type: "object",
+    allowedParents: ["Card", "Column", "List"],
+    properties: { component: { const: "FlightSegment" }, from: { $ref: "common_types.json#/$defs/DynamicString" }, "…": "…" },
+    required: ["component", "from", "to"],
+  },
+}
+
 const RATING_SCHEMA = {
   Rating: {
     type: "object",
@@ -70,6 +92,10 @@ const RATING_SCHEMA = {
 function CustomCatalogDemo() {
   const [catalog, setCatalog] = useState(TRAVEL_CATALOG_ID)
   const a2ui = useDemo(flight(TRAVEL_CATALOG_ID))
+  const { version } = useProtocolVersion()
+  const shown = useConverted(flight(catalog))
+  const createMsg = shown[0] as { createSurface: { catalogId: string } }
+  const segment = (shown[1] as { updateComponents: { components: unknown[] } }).updateComponents.components[3]
   const pick = (id: string) => {
     if (!id) return
     setCatalog(id)
@@ -90,7 +116,10 @@ function CustomCatalogDemo() {
       <div className="grid gap-4 lg:grid-cols-2">
         <SurfacePreview a2ui={a2ui} />
         <div className="flex min-w-0 flex-col gap-2">
-          <CodeBlock title="createSurface.catalogId" code={{ catalogId: catalog }} />
+          <CodeBlock
+            title={version === "v1.0" ? "v1.0：surface 用 basic，FlightSegment 自带 catalogId" : "createSurface.catalogId"}
+            code={version === "v1.0" ? { "createSurface.catalogId": createMsg.createSurface.catalogId, FlightSegment: segment } : { catalogId: catalog }}
+          />
           <div className="max-h-52 overflow-y-auto rounded-lg border bg-muted/20 p-2">
             <MessageLog log={a2ui.log} />
           </div>
@@ -129,6 +158,36 @@ const themed = (primaryColor: string, agentDisplayName: string) => [
   ]),
   data("themed", { mode: ["fast"] }),
 ]
+
+function ThemeRemovedDemo() {
+  const a2ui = useA2UI()
+  return (
+    <DemoCard title="v1.0 中的 theme" description="theme 与 primaryColor 已从 catalog 和 createSurface 中移除">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <CodeBlock code={{ version: "v1.0", createSurface: { surfaceId: "themed", catalogId: BASIC_CATALOG_V1_ID, theme: { primaryColor: "#db2777" } } }} />
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-fit"
+            onClick={() => {
+              a2ui.reset()
+              a2ui.sendRaw({ version: "v1.0", createSurface: { surfaceId: "themed", catalogId: BASIC_CATALOG_V1_ID, theme: { primaryColor: "#db2777" } } })
+            }}
+          >
+            照 v0.9 的习惯发送 theme
+          </Button>
+        </div>
+        <div className="max-h-56 overflow-y-auto rounded-lg border bg-muted/20 p-2">
+          <MessageLog log={a2ui.log} empty="点击左侧按钮" />
+        </div>
+      </div>
+      <Callout tone="info">
+        v1.0 把“画什么”（布局、组件）和“怎么画”（品牌、颜色）彻底分开：外观完全由渲染器及其设计系统决定。渲染器仍会创建 surface，但会报告这个字段无效。
+      </Callout>
+    </DemoCard>
+  )
+}
 
 function ThemeDemo() {
   const [color, setColor] = useState(SWATCHES[0])
@@ -194,7 +253,7 @@ const ATTEMPT_2 = [
 ]
 
 function LoopDemo() {
-  const a2ui = useA2UI()
+  const a2ui = useVersionedA2UI()
   const [stage, setStage] = useState<0 | 1 | 2>(0)
   const errors = a2ui.log.filter((e) => e.kind === "error")
 
@@ -252,6 +311,9 @@ function LoopDemo() {
 
 export default function CatalogLesson() {
   const evil = useDemo(EVIL)
+  const evilShown = useConverted(EVIL)
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
 
   return (
     <LessonShell
@@ -263,10 +325,14 @@ export default function CatalogLesson() {
         </>
       }
       takeaways={[
-        "Catalog 用 JSON Schema 定义组件、函数与主题；用 catalogId（通常是 URI）标识。",
-        "客户端通过能力声明（supportedCatalogIds）告诉 Agent 自己支持哪些 catalog，Agent 在 createSurface 中选用其一。",
+        v1
+          ? "Catalog 用 JSON Schema 定义组件与函数（v1.0 不再有主题）；用 catalogId 标识，并声明 protocolVersion。"
+          : "Catalog 用 JSON Schema 定义组件、函数与主题；用 catalogId（通常是 URI）标识。",
+        v1
+          ? "渲染器通过能力声明告诉 Agent 支持哪些 catalog；v1.0 中它们可以在同一个 surface 里混用。"
+          : "客户端通过能力声明（supportedCatalogIds）告诉 Agent 自己支持哪些 catalog，Agent 在 createSurface 中选用其一。",
         "不在 catalog 中的组件被拒绝渲染，并以 VALIDATION_FAILED 错误回报；文本永远按文本显示，不会被当成 HTML。",
-        "v0.9 是“prompt-first”：schema 写进提示词，生成后校验，错误反馈给 LLM 自我修正。",
+        "从 v0.9 起采用“prompt-first”（v1.0 延续）：schema 写进提示词，生成后校验，错误反馈给 LLM 自我修正。",
       ]}
       quiz={[
         {
@@ -289,17 +355,27 @@ export default function CatalogLesson() {
             items={[
               <><strong>components</strong>：每种组件的名称与属性 schema（必填项、枚举值、可绑定类型）。</>,
               <><strong>functions</strong>：可调用的函数、参数与返回类型（上一章的 required、formatString…）。</>,
-              <><strong>theme</strong>：createSurface 可接受的主题参数。</>,
-              <><strong>catalogId</strong>：唯一标识，如 <C>…/v0_9/catalogs/basic/catalog.json</C>。</>,
+              v1 ? (
+                <><strong>allowedCallers / allowedParents</strong>：v1.0 中函数可声明谁能调用，组件可声明能放在哪些父组件中。</>
+              ) : (
+                <><strong>theme</strong>：createSurface 可接受的主题参数。</>
+              ),
+              <><strong>catalogId</strong>：唯一标识，如 <C>…/{v1 ? "v1_0" : "v0_9"}/catalogs/basic/catalog.json</C>。</>,
             ]}
           />
-          <CodeBlock
-            title="客户端能力声明（随 A2A 消息的 metadata 发送）"
-            code={{
-              a2uiClientCapabilities: {
-                supportedCatalogIds: [BASIC_CATALOG_ID, TRAVEL_CATALOG_ID],
-              },
-            }}
+          <ByVersion
+            v09={
+              <CodeBlock
+                title="客户端能力声明（随 A2A 消息的 metadata 发送）"
+                code={{ a2uiClientCapabilities: { supportedCatalogIds: [BASIC_CATALOG_ID, TRAVEL_CATALOG_ID] } }}
+              />
+            }
+            v10={
+              <CodeBlock
+                title="渲染器能力声明（v1.0 按版本分组）"
+                code={{ a2uiRendererCapabilities: { "v1.0": { supportedCatalogIds: [BASIC_CATALOG_V1_ID, TRAVEL_CATALOG_V1_ID] } } }}
+              />
+            }
           />
         </div>
       </Section>
@@ -310,7 +386,7 @@ export default function CatalogLesson() {
         </P>
         <DemoCard title="白名单渲染">
           <div className="grid gap-4 lg:grid-cols-2">
-            <MessageEditor a2ui={evil} initial={pretty(EVIL)} minHeight={340} />
+            <MessageEditor a2ui={evil} initial={pretty(evilShown)} minHeight={340} />
             <div className="flex min-w-0 flex-col gap-3">
               <SurfacePreview a2ui={evil} />
               <Inspector a2ui={evil} tabs={["log"]} height={200} />
@@ -328,20 +404,29 @@ export default function CatalogLesson() {
           basic catalog 只是起点。业务可以定义自己的 catalog，加入领域组件（图表、地图、航班卡片……）。组件的样子和行为完全由客户端实现，
           Agent 只需要在 schema 里看到它：
         </P>
-        <CodeBlock title="catalog.json 中的 Rating 组件（示意）" code={RATING_SCHEMA} maxHeight={260} />
+        <CodeBlock
+          title={v1 ? "v1.0 travel catalog（示意：只声明领域组件）" : "catalog.json 中的 Rating 组件（示意）"}
+          code={v1 ? { catalogId: TRAVEL_CATALOG_V1_ID, protocolVersion: "1.0", components: RATING_SCHEMA_V1 } : RATING_SCHEMA}
+          maxHeight={260}
+        />
         <CustomCatalogDemo />
+        <VersionNote when="v1.0" summary="catalog 可以混用，组件可以声明组合约束">
+          v0.9 中一个 surface 只能用一份 catalog，所以自定义 catalog 往往要把 basic 组件整个复制进去。v1.0 里 surface 用 basic 作为默认 catalog，
+          领域组件在自身上写 <C>catalogId</C> 即可；渲染器按“组件 catalogId → surface 默认 catalogId → 报错”的顺序解析。
+          travel catalog 还声明了 <C>FlightSegment.allowedParents</C>，放进 Row 会得到 <C>UNALLOWED_PARENT</C> 错误（见“版本对比”页）。
+        </VersionNote>
       </Section>
 
       <Section title="主题" kicker="04 · 外观">
-        <ThemeDemo />
-        <Callout tone="warn" title="版本提示">
-          在 v1.0 候选版中，<C>theme</C> 与 <C>primaryColor</C> 已从 catalog 和 createSurface 中移除，以便把布局与品牌彻底分开。
-        </Callout>
+        {v1 ? <ThemeRemovedDemo /> : <ThemeDemo />}
+        <VersionNote when="v1.0" summary="theme 与 primaryColor 已被移除">
+          在 v1.0 中，<C>theme</C> 从 catalog 定义和 createSurface 中移除，以便把布局与品牌彻底分开；归属信息等可以通过 <C>metadata.extensions</C> 传递。
+        </VersionNote>
       </Section>
 
       <Section title="Prompt → Generate → Validate" kicker="05 · 生成循环">
         <P>
-          v0.9 把 catalog schema 直接放进 LLM 的提示词（prompt-first），而不是依赖结构化输出。这让 catalog 可以写得更丰富，代价是生成结果必须校验。
+          从 v0.9 开始（v1.0 延续），A2UI 把 catalog schema 直接放进 LLM 的提示词（prompt-first），而不是依赖结构化输出。这让 catalog 可以写得更丰富，代价是生成结果必须校验。
           校验失败时，把标准格式的错误交还给模型，形成一个自我纠错的循环。
         </P>
         <LoopDemo />

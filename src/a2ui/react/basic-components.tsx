@@ -83,6 +83,8 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   callFunction,
   failedChecks,
+  isLocalFunction,
+  remoteKey,
   resolveString,
   resolveValue,
   stringify,
@@ -138,6 +140,24 @@ function FieldLabel({ htmlFor, text }: { htmlFor?: string; text: string }) {
       {text}
     </Label>
   )
+}
+
+function FieldErrors({ errors }: { errors: string[] }) {
+  if (!errors.length) return null
+  return (
+    <ul className="flex flex-col gap-0.5 text-xs text-destructive">
+      {errors.map((e, i) => (
+        <li key={i}>{e}</li>
+      ))}
+    </ul>
+  )
+}
+
+/** checks：交互过后才显示错误，避免一打开就满屏报错 */
+function useChecks(comp: RendererProps["comp"], scope: string) {
+  const [touched, setTouched] = useState(false)
+  const errors = failedChecks(comp.checks, useEvalContext(scope))
+  return { errors: touched ? errors : [], touch: () => setTouched(true) }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,9 +216,12 @@ const TEXT_CLASS: Record<string, string> = {
 
 const TextView: ComponentRenderer = ({ comp, scope }) => {
   const inline = useContext(InlineContext)
-  const text = resolveString(comp.text, useEvalContext(scope))
-  const variant = String(comp.variant ?? "body")
-  const cls = TEXT_CLASS[variant] ?? TEXT_CLASS.body
+  const ctx = useEvalContext(scope)
+  const text = resolveString(comp.text, ctx)
+  // v1.0 的 Text 只有 caption / body，标题通过 Markdown 表达
+  const allowed = ctx.version === "v1.0" ? ["caption", "body"] : Object.keys(TEXT_CLASS)
+  const variant = allowed.includes(String(comp.variant)) ? String(comp.variant) : "body"
+  const cls = TEXT_CLASS[variant]
   if (inline) return <span className={cn(variant.startsWith("h") && "font-semibold")}>{renderInline(text)}</span>
   if (isBlockMarkdown(text)) {
     return (
@@ -323,9 +346,11 @@ const IconView: ComponentRenderer = ({ comp, scope }) => {
   return <Icon className="size-5 shrink-0" />
 }
 
-const VideoView: ComponentRenderer = ({ comp, scope }) => (
-  <video controls src={resolveString(comp.url, useEvalContext(scope))} className="w-full rounded-lg bg-black" />
-)
+const VideoView: ComponentRenderer = ({ comp, scope }) => {
+  const ctx = useEvalContext(scope)
+  const poster = ctx.version === "v1.0" ? resolveString(comp.posterUrl, ctx) : ""
+  return <video controls src={resolveString(comp.url, ctx)} poster={poster || undefined} className="w-full rounded-lg bg-black" />
+}
 
 const AudioView: ComponentRenderer = ({ comp, scope }) => {
   const ctx = useEvalContext(scope)
@@ -419,7 +444,16 @@ const ButtonView: ComponentRenderer = ({ comp, scope, ancestors }) => {
     if (action.event) {
       controller?.dispatchAction(surface.id, comp.id, action.event, scope)
     } else if (isFunctionCall(action.functionCall)) {
-      callFunction(action.functionCall, ctx)
+      const fc = action.functionCall as { call: string; catalogId?: string; args?: Record<string, unknown> }
+      if (ctx.version === "v1.0" && !isLocalFunction(fc.call, "v1.0")) {
+        // v1.0：本地没有注册的函数 → 交给 Agent 执行
+        const args = Object.fromEntries(Object.entries(fc.args ?? {}).map(([k, v]) => [k, resolveValue(v, ctx)]))
+        controller?.callAgentFunction(surface.id, `${remoteKey(fc.call, args, fc.catalogId)}#${Date.now()}`, {
+          call: fc.call,
+          ...(fc.catalogId ? { catalogId: fc.catalogId } : {}),
+          args,
+        })
+      } else callFunction(fc, ctx)
     }
   }
 
@@ -446,7 +480,7 @@ const TextFieldView: ComponentRenderer = ({ comp, scope }) => {
   const text = stringify(value)
 
   const errors = failedChecks(comp.checks, ctx)
-  if (typeof comp.validationRegexp === "string" && text) {
+  if (ctx.version !== "v1.0" && typeof comp.validationRegexp === "string" && text) {
     try {
       if (!new RegExp(comp.validationRegexp).test(text)) errors.push("格式不正确")
     } catch {
@@ -460,9 +494,11 @@ const TextFieldView: ComponentRenderer = ({ comp, scope }) => {
     setValue(variant === "number" && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : v)
   }
 
+  const placeholder = ctx.version === "v1.0" ? resolveString(comp.placeholder, ctx) : ""
   const common = {
     id,
     value: text,
+    placeholder: placeholder || undefined,
     "aria-invalid": showErrors || undefined,
     onBlur: () => setTouched(true),
   }
@@ -479,13 +515,7 @@ const TextFieldView: ComponentRenderer = ({ comp, scope }) => {
           onChange={(e) => onChange(e.target.value)}
         />
       )}
-      {showErrors && (
-        <ul className="flex flex-col gap-0.5 text-xs text-destructive">
-          {errors.map((e, i) => (
-            <li key={i}>{e}</li>
-          ))}
-        </ul>
-      )}
+      {showErrors && <FieldErrors errors={errors} />}
     </div>
   )
 }
@@ -493,12 +523,23 @@ const TextFieldView: ComponentRenderer = ({ comp, scope }) => {
 const CheckBoxView: ComponentRenderer = ({ comp, scope }) => {
   const id = useId()
   const [value, setValue] = useBinding<boolean>(comp.value, scope, false)
+  const { errors, touch } = useChecks(comp, scope)
   return (
-    <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={Boolean(value)} onCheckedChange={(v) => setValue(v === true)} />
-      <Label htmlFor={id} className="text-sm font-normal">
-        {resolveString(comp.label, useEvalContext(scope))}
-      </Label>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={id}
+          checked={Boolean(value)}
+          onCheckedChange={(v) => {
+            touch()
+            setValue(v === true)
+          }}
+        />
+        <Label htmlFor={id} className="text-sm font-normal">
+          {resolveString(comp.label, useEvalContext(scope))}
+        </Label>
+      </div>
+      <FieldErrors errors={errors} />
     </div>
   )
 }
@@ -517,8 +558,10 @@ const ChoicePickerView: ComponentRenderer = ({ comp, scope }) => {
   const visible = filter
     ? options.filter((o) => o.label.toLowerCase().includes(filter.toLowerCase()))
     : options
+  const { errors, touch } = useChecks(comp, scope)
 
   const toggle = (v: string) => {
+    touch()
     if (exclusive) setValue([v])
     else setValue(selected.includes(v) ? selected.filter((s) => s !== v) : [...selected, v])
   }
@@ -565,6 +608,7 @@ const ChoicePickerView: ComponentRenderer = ({ comp, scope }) => {
           )
         })}
       </div>
+      <FieldErrors errors={errors} />
     </div>
   )
 }
@@ -572,15 +616,30 @@ const ChoicePickerView: ComponentRenderer = ({ comp, scope }) => {
 const SliderView: ComponentRenderer = ({ comp, scope }) => {
   const min = typeof comp.min === "number" ? comp.min : 0
   const max = typeof comp.max === "number" ? comp.max : 100
+  const ctx = useEvalContext(scope)
   const [value, setValue] = useBinding<number>(comp.value, scope, min)
+  const { errors, touch } = useChecks(comp, scope)
   const n = Number(value) || 0
+  // v1.0 steps：把区间等分为 N 份；否则小区间（如 0–1）用细步长
+  const steps = ctx.version === "v1.0" && typeof comp.steps === "number" && comp.steps >= 1 ? comp.steps : null
+  const step = steps ? (max - min) / steps : max - min <= 1 ? 0.01 : 1
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex items-center justify-between">
-        <FieldLabel text={resolveString(comp.label, useEvalContext(scope))} />
-        <span className="font-mono text-xs tabular-nums">{n}</span>
+        <FieldLabel text={resolveString(comp.label, ctx)} />
+        <span className="font-mono text-xs tabular-nums">{Number.isInteger(n) ? n : n.toFixed(2)}</span>
       </div>
-      <Slider value={[n]} min={min} max={max} step={1} onValueChange={([v]) => setValue(v)} />
+      <Slider
+        value={[n]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={([v]) => {
+          touch()
+          setValue(v)
+        }}
+      />
+      <FieldErrors errors={errors} />
     </div>
   )
 }
@@ -594,6 +653,7 @@ const DateTimeView: ComponentRenderer = ({ comp, scope }) => {
   const type = date && time ? "datetime-local" : time ? "time" : "date"
   const v = stringify(value)
   const shown = type === "datetime-local" ? v.slice(0, 16) : type === "date" ? v.slice(0, 10) : v.slice(0, 5)
+  const { errors, touch } = useChecks(comp, scope)
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <FieldLabel htmlFor={id} text={resolveString(comp.label, ctx)} />
@@ -603,8 +663,12 @@ const DateTimeView: ComponentRenderer = ({ comp, scope }) => {
         value={shown}
         min={comp.min ? resolveString(comp.min, ctx) : undefined}
         max={comp.max ? resolveString(comp.max, ctx) : undefined}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          touch()
+          setValue(e.target.value)
+        }}
       />
+      <FieldErrors errors={errors} />
     </div>
   )
 }

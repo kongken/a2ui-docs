@@ -1,12 +1,14 @@
 import { createContext, useContext } from "react"
 
-import type { EvalContext } from "../evaluate"
+import type { EvalContext, RemoteBridge } from "../evaluate"
 import type { Surface } from "../types"
 import type { A2UIController } from "../use-a2ui"
 
 export interface SurfaceContextValue {
   surface: Surface
   controller?: A2UIController
+  /** 本次渲染中需要远程执行的函数调用（渲染结束后统一发送） */
+  requestRemote: RemoteBridge["request"]
   /** 调试模式：为每个组件画出边框并标注 id */
   inspect: boolean
   highlight?: string | null
@@ -25,6 +27,11 @@ export function useSurfaceContext() {
 }
 
 export function useEvalContext(scope: string): EvalContext {
-  const { surface } = useSurfaceContext()
-  return { data: surface.dataModel, scope }
+  const { surface, requestRemote } = useSurfaceContext()
+  return {
+    data: surface.dataModel,
+    scope,
+    version: surface.version,
+    remote: { lookup: (key) => surface.remote[key], request: requestRemote },
+  }
 }

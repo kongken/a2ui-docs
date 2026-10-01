@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CodeBlock, C } from "@/components/learn/code-block"
 import { SurfacePreview } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
-import { useDemo } from "@/components/learn/message-editor"
+import { useConverted, useDemo } from "@/components/learn/message-editor"
 import { Bullets, Callout, P, Section, Steps } from "@/components/learn/prose"
 
 import { bind, comps, create, data, text } from "./msg"
@@ -54,6 +54,7 @@ function ThreeWays() {
   const a2ui = useDemo(BOOKING, {
     onAction: (a) => setLastAction(JSON.stringify(a.context)),
   })
+  const shown = useConverted(BOOKING)
 
   return (
     <Tabs defaultValue="a2ui" className="gap-4">
@@ -117,7 +118,7 @@ function ThreeWays() {
 
       <TabsContent value="a2ui" className="grid gap-4 md:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2">
-          <CodeBlock title="Agent 发送的是数据（节选）" code={BOOKING[1]} maxHeight={320} />
+          <CodeBlock title="Agent 发送的是数据（节选）" code={shown[1]} maxHeight={320} />
         </div>
         <div className="flex min-w-0 flex-col gap-3">
           <SurfacePreview a2ui={a2ui} />

@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom"
-import { ArrowUpRight, CircleCheck, FlaskConical, House, LayoutGrid } from "lucide-react"
+import { ArrowUpRight, CircleCheck, FlaskConical, GitCompareArrows, House, LayoutGrid } from "lucide-react"
 
 import { Progress } from "@/components/ui/progress"
 import {
@@ -17,6 +17,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useProgress } from "@/hooks/use-progress"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 import { LESSONS } from "@/lessons/meta"
 
 const EXTERNAL = [
@@ -38,6 +39,7 @@ export function Logo({ className }: { className?: string }) {
 
 export function AppSidebar() {
   const { done } = useProgress()
+  const { version } = useProtocolVersion()
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
   const close = () => setOpenMobile(false)
@@ -50,7 +52,7 @@ export function AppSidebar() {
           <Logo className="size-7" />
           <div className="flex flex-col leading-tight">
             <span className="text-sm font-semibold">A2UI 渐进学习</span>
-            <span className="text-[11px] text-muted-foreground">Agent-to-UI 协议 · v0.9</span>
+            <span className="text-[11px] text-muted-foreground">Agent-to-UI 协议 · {version}</span>
           </div>
         </NavLink>
       </SidebarHeader>
@@ -109,6 +111,13 @@ export function AppSidebar() {
                 <SidebarMenuButton asChild isActive={pathname === "/gallery"}>
                   <NavLink to="/gallery" onClick={close}>
                     <LayoutGrid /> 组件画廊
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === "/versions"}>
+                  <NavLink to="/versions" onClick={close}>
+                    <GitCompareArrows /> 版本对比 v0.9 ↔ v1.0
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>

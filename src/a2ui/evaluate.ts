@@ -1,13 +1,45 @@
 // 动态值求值：字面量 / {path} 数据绑定 / {call} 函数调用
 // 以及 basic catalog 中注册的函数实现
 
-import { getAt, resolvePath } from "./pointer"
-import { isDataBinding, isFunctionCall, type FunctionCall } from "./types"
+import { getAt, parsePointer, resolvePath } from "./pointer"
+import { isDataBinding, isFunctionCall, type FunctionCall, type ProtocolVersion, type RemoteResult } from "./types"
+
+/** v1.0：渲染器找不到本地函数时，转交 Agent 执行（callAgentFunction） */
+export interface RemoteBridge {
+  lookup(key: string): RemoteResult | undefined
+  request(key: string, callFunction: { call: string; catalogId?: string; args: Record<string, unknown> }): void
+}
 
 export interface EvalContext {
   data: Record<string, unknown>
   /** 当前集合作用域，例如模板中的 "/items/2"；根作用域为 "" */
   scope: string
+  /** 默认 v0.9 */
+  version?: ProtocolVersion
+  remote?: RemoteBridge
+}
+
+/** 远程函数尚未返回时的占位值 */
+export const PENDING: Readonly<{ __a2uiPending: true }> = Object.freeze({ __a2uiPending: true })
+export const isPending = (v: unknown) => v === PENDING
+
+/** v1.0 校验函数的返回结构 */
+export interface ValidationResult {
+  valid: boolean
+  code?: string
+  message?: string
+  severity?: "error" | "warning" | "info"
+}
+
+export function isValidationResult(v: unknown): v is ValidationResult {
+  return !!v && typeof v === "object" && typeof (v as ValidationResult).valid === "boolean"
+}
+
+/** 布尔语义：ValidationResult 取 valid；等待中视为 false */
+export function truthy(v: unknown): boolean {
+  if (isPending(v)) return false
+  if (isValidationResult(v)) return v.valid
+  return Boolean(v)
 }
 
 export function resolveValue(value: unknown, ctx: EvalContext): unknown {
@@ -25,6 +57,7 @@ export function resolveString(value: unknown, ctx: EvalContext): string {
 
 export function stringify(v: unknown): string {
   if (v === null || v === undefined) return ""
+  if (isPending(v)) return "…"
   if (typeof v === "object") return JSON.stringify(v)
   return String(v)
 }
@@ -188,26 +221,67 @@ export const BASIC_FUNCTIONS: Record<string, Fn> = {
     return undefined
   },
 
-  // —— 逻辑 ——
-  and: ({ values }) => Array.isArray(values) && values.every(Boolean),
-  or: ({ values }) => Array.isArray(values) && values.some(Boolean),
-  not: ({ value }) => !value,
+  // —— 逻辑（v1.0 的校验函数返回 ValidationResult，按 valid 参与运算）——
+  and: ({ values }) => Array.isArray(values) && values.every(truthy),
+  or: ({ values }) => Array.isArray(values) && values.some(truthy),
+  not: ({ value }) => !truthy(value),
 
   // formatString 规范示例里的 ${now()}
   now: () => new Date().toISOString(),
 }
 
-export function callFunction(fc: FunctionCall, ctx: EvalContext): unknown {
-  const fn = BASIC_FUNCTIONS[fc.call]
+const VALIDATORS = new Set(["required", "regex", "length", "numeric", "email"])
+
+/** 渲染器本地可执行的函数（v1.0 另有内置的 @index） */
+export function isLocalFunction(name: string, version: ProtocolVersion = "v0.9") {
+  return name in BASIC_FUNCTIONS || (version === "v1.0" && name === "@index")
+}
+
+/** 远程调用的缓存键：同样的函数 + 参数只请求一次 */
+export function remoteKey(call: string, args: Record<string, unknown>, catalogId?: string) {
+  return JSON.stringify({ call, catalogId, args })
+}
+
+/** @index：模板作用域中当前元素的下标（仅 v1.0） */
+function currentIndex(ctx: EvalContext): number | undefined {
+  const last = parsePointer(ctx.scope).at(-1)
+  return last !== undefined && /^\d+$/.test(last) ? Number(last) : undefined
+}
+
+/** 用已解析的参数调用函数 */
+function invoke(name: string, args: Record<string, unknown>, ctx: EvalContext, catalogId?: string): unknown {
+  const version = ctx.version ?? "v0.9"
+  if (version === "v1.0" && name === "@index") {
+    const i = currentIndex(ctx)
+    if (i === undefined) {
+      console.warn("[a2ui] @index 只能在模板（集合作用域）中使用")
+      return undefined
+    }
+    return i + (Number(args.offset) || 0)
+  }
+  const fn = BASIC_FUNCTIONS[name]
   if (!fn) {
-    console.warn(`[a2ui] 未注册的函数: ${fc.call}`)
+    if (version === "v1.0" && ctx.remote) {
+      const key = remoteKey(name, args, catalogId)
+      const hit = ctx.remote.lookup(key)
+      if (hit?.status === "done") return hit.value
+      if (hit?.status === "error") return null
+      if (!hit) ctx.remote.request(key, { call: name, ...(catalogId ? { catalogId } : {}), args })
+      return PENDING
+    }
+    console.warn(`[a2ui] 未注册的函数: ${name}`)
     return undefined
   }
+  const result = fn(args, ctx)
+  return version === "v1.0" && VALIDATORS.has(name) ? { valid: Boolean(result) } : result
+}
+
+export function callFunction(fc: FunctionCall, ctx: EvalContext): unknown {
   const args: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(fc.args ?? {})) {
     args[k] = resolveValue(v, ctx)
   }
-  return fn(args, ctx)
+  return invoke(fc.call, args, ctx, (fc as { catalogId?: string }).catalogId)
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +372,7 @@ function evalLiteral(raw: string, ctx: EvalContext): unknown {
 
 function evalExpression(expr: string, ctx: EvalContext): unknown {
   const e = expr.trim()
-  const fn = /^([A-Za-z_][\w]*)\s*\(([\s\S]*)\)$/.exec(e)
+  const fn = /^(@?[A-Za-z_][\w]*)\s*\(([\s\S]*)\)$/.exec(e)
   if (fn) {
     const [, name, argSrc] = fn
     const args: Record<string, unknown> = {}
@@ -307,8 +381,7 @@ function evalExpression(expr: string, ctx: EvalContext): unknown {
       if (idx === -1) continue
       args[part.slice(0, idx).trim()] = evalLiteral(part.slice(idx + 1), ctx)
     }
-    const impl = BASIC_FUNCTIONS[name]
-    return impl ? impl(args, ctx) : undefined
+    return invoke(name, args, ctx)
   }
   return getAt(ctx.data, resolvePath(e, ctx.scope))
 }
@@ -325,7 +398,12 @@ export function failedChecks(checks: unknown, ctx: EvalContext): string[] {
     const r = rule as { condition?: unknown; message?: string }
     // 规范 schema 使用 { condition, message }；部分文档示例把 call 直接写在规则上
     const condition = "condition" in r ? r.condition : rule
-    if (!resolveValue(condition, ctx)) failed.push(r.message ?? "校验未通过")
+    const result = resolveValue(condition, ctx)
+    if (isPending(result)) failed.push("验证中…")
+    // v1.0：ValidationResult 自带 message，CheckRule.message 作为兜底
+    else if (isValidationResult(result)) {
+      if (!result.valid) failed.push(result.message ?? r.message ?? "校验未通过")
+    } else if (!result) failed.push(r.message ?? "校验未通过")
   }
   return failed
 }

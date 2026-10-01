@@ -10,6 +10,8 @@ import { Inspector, SurfacePreview } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
 import { JsonTextarea, useDemo } from "@/components/learn/message-editor"
 import { Bullets, Callout, DataTable, P, Section } from "@/components/learn/prose"
+import { VersionNote } from "@/components/learn/version-note"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, fmt, text, unset } from "./msg"
 
@@ -152,6 +154,8 @@ function PointerPlayground() {
 }
 
 export default function DataBindingLesson() {
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
   return (
     <LessonShell
       slug="data-binding"
@@ -165,7 +169,9 @@ export default function DataBindingLesson() {
         <>属性值有三种写法：字面量 <C>"Hi"</C>、数据绑定 <C>{`{"path": "/user/name"}`}</C>、函数调用 <C>{`{"call": …}`}</C>。</>,
         "每个 surface 有自己的数据模型（一个 JSON 对象），用 updateDataModel 修改。",
         "路径遵循 JSON Pointer (RFC 6901)：/ 分隔层级，数字是数组下标，~1 表示 /、~0 表示 ~。",
-        "updateDataModel 是 upsert：给 value 即写入；省略 value 即删除；省略 path 即替换整个模型。",
+        v1
+          ? "updateDataModel 是 upsert：给 value 即写入；value 为 null 即删除（value 必填）；省略 path 即替换整个模型。"
+          : "updateDataModel 是 upsert：给 value 即写入；省略 value 即删除；省略 path 即替换整个模型。",
       ]}
       quiz={[
         {
@@ -185,12 +191,19 @@ export default function DataBindingLesson() {
           answer: 1,
           explain: "items 是数组，下标从 0 开始，1 指向第二项“滤纸”，其 price 为 15。",
         },
-        {
-          q: "发送一条只有 surfaceId 和 path、没有 value 的 updateDataModel，会发生什么？",
-          options: ["报错", "把该路径的值设为 null", "删除该路径上的键", "什么都不做"],
-          answer: 2,
-          explain: "省略 value 表示删除（数组中则把该下标设为 undefined，保持长度不变）。",
-        },
+        v1
+          ? {
+              q: "在 v1.0 中，发送一条只有 surfaceId 和 path、没有 value 的 updateDataModel，会发生什么？",
+              options: ["删除该路径上的键", "把该路径的值设为 null", "校验失败：v1.0 的 value 是必填的", "什么都不做"],
+              answer: 2,
+              explain: "v1.0 把删除改为显式的 \"value\": null，省略 value 会被当作格式错误（v0.9 中省略 value 才表示删除）。",
+            }
+          : {
+              q: "发送一条只有 surfaceId 和 path、没有 value 的 updateDataModel，会发生什么？",
+              options: ["报错", "把该路径的值设为 null", "删除该路径上的键", "什么都不做"],
+              answer: 2,
+              explain: "省略 value 表示删除（数组中则把该下标设为 undefined，保持长度不变）。",
+            },
       ]}
     >
       <Section title="属性值的三种写法" kicker="01 · 取值">
@@ -227,10 +240,16 @@ export default function DataBindingLesson() {
           mono={[]}
           rows={[
             [<C>{`{ "path": "/user/name", "value": "Bob" }`}</C>, "路径存在则更新，不存在则创建（中间层级自动补齐）"],
-            [<C>{`{ "path": "/user/tempData" }`}</C>, "省略 value：删除该键"],
+            v1
+              ? [<C>{`{ "path": "/user/tempData", "value": null }`}</C>, "value 为 null：删除该键（v1.0 中 value 必填）"]
+              : [<C>{`{ "path": "/user/tempData" }`}</C>, "省略 value：删除该键"],
             [<C>{`{ "value": { … } }`}</C>, <>省略 path（或 path 为 <C>/</C>）：替换整个数据模型</>],
           ]}
         />
+        <VersionNote when="v1.0" summary="删除数据改为显式的 value: null">
+          v1.0 中 <C>value</C> 是必填字段：写入时给出新值，删除时发送 <C>"value": null</C>，省略 value 会被渲染器当作格式错误。
+          上面“删除 /user/title”按钮在 v1.0 下发送的就是 null —— 打开消息日志对比一下。
+        </VersionNote>
         <Callout tone="tip" title="最佳实践">
           <Bullets
             items={[

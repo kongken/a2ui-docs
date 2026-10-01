@@ -3,7 +3,9 @@ import { useEffect, useState, type ReactNode } from "react"
 import { RotateCcw, Send } from "lucide-react"
 import { cn } from "cn"
 
-import { parseMessages, useA2UI, type A2UIHandle, type UseA2UIOptions } from "@/a2ui"
+import { parseMessages, type A2UIHandle, type UseA2UIOptions } from "@/a2ui"
+
+import { useConverted, useVersionedA2UI } from "./use-versioned"
 import { Button } from "@/components/ui/button"
 
 import { highlightJson } from "./code-block"
@@ -75,11 +77,12 @@ export function MessageEditor({
   const [text, setText] = useState(initial)
   const [error, setError] = useState<string | null>(null)
 
+  // 编辑器里是什么就发送什么（不做版本转换），方便观察各版本的校验
   const run = (src: string) => {
     const { messages, error } = parseMessages(src)
     setError(error ?? null)
     a2ui.reset()
-    a2ui.send(messages)
+    a2ui.sendRaw(messages)
   }
 
   return (
@@ -109,9 +112,11 @@ export function MessageEditor({
   )
 }
 
+export { useConverted, useVersionedA2UI }
+
 /** 课程演示用：挂载时发送初始消息（兼容 StrictMode 的双重执行） */
 export function useDemo(initial: unknown[], options?: UseA2UIOptions) {
-  const a2ui = useA2UI(options)
+  const a2ui = useVersionedA2UI(options)
   const { reset, send } = a2ui
   useEffect(() => {
     reset()
