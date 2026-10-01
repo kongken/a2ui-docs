@@ -3,6 +3,7 @@ import { cn } from "cn"
 
 import { CATALOGS } from "../catalog"
 import { getAt, resolvePath } from "../pointer"
+import { resolveCatalogId } from "../processor"
 import { useSurfaceContext } from "./context"
 import { RENDERERS } from "./registry"
 
@@ -33,15 +34,19 @@ export function Node({ id, scope, ancestors }: NodeProps) {
     )
   }
 
-  const allowed = CATALOGS[surface.catalogId]?.components[comp.component]
-  const Renderer = allowed ? RENDERERS[surface.catalogId]?.[comp.component] : undefined
+  // v1.0 可以混用 catalog：先看组件自己的 catalogId，再看 surface 默认值
+  const catalogId = resolveCatalogId(surface, comp)
+  const catalog = catalogId ? CATALOGS[catalogId] : undefined
+  const allowed = catalog?.protocol === surface.version && catalog.components[comp.component]
+  const Renderer = allowed && catalogId ? RENDERERS[catalogId]?.[comp.component] : undefined
 
   let el = Renderer ? (
     <Renderer comp={comp} scope={scope} ancestors={[...ancestors, id]} />
   ) : (
     <Placeholder tone="error" icon={<Ban className="size-3.5" />}>
       <span>
-        <code>{String(comp.component)}</code> 不在 catalog 中，已拒绝渲染
+        <code>{String(comp.component)}</code>{" "}
+        {!catalogId ? "没有可用的 catalog（v1.0 需组件或 surface 指定 catalogId）" : "不在 catalog 中，已拒绝渲染"}
       </span>
     </Placeholder>
   )

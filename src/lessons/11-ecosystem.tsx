@@ -2,10 +2,12 @@ import { Link } from "react-router-dom"
 import { ArrowUpRight, FlaskConical, LayoutGrid } from "lucide-react"
 import { cn } from "cn"
 
+import { convertMessages } from "@/a2ui"
 import { Badge } from "@/components/ui/badge"
 import { CodeBlock, C } from "@/components/learn/code-block"
 import { LessonShell } from "@/components/learn/lesson-shell"
 import { Bullets, Callout, DataTable, P, Section } from "@/components/learn/prose"
+import { ByVersion } from "@/components/learn/version-note"
 
 const TRANSPORTS = [
   { name: "A2A", desc: "Agent2Agent 协议。每个 A2UI 信封对应一个 A2A 消息 Part；能力与数据模型放在 message metadata 中；会话对应 contextId。" },
@@ -73,6 +75,8 @@ const V09 = {
   },
 }
 
+const V10 = convertMessages([V09], "v1.0")[0]
+
 const LINKS = [
   { label: "a2ui.org 官方文档", href: "https://a2ui.org/", desc: "概念、指南、规范与生态" },
   { label: "Quickstart：餐厅查找 Demo", href: "https://a2ui.org/quickstart/", desc: "官方端到端示例" },
@@ -102,7 +106,7 @@ export default function EcosystemLesson() {
           q: "为什么 A2UI 要求传输层提供“元数据”能力？",
           options: ["为了压缩消息", "用于交换客户端能力（supportedCatalogIds）和 sendDataModel 的数据模型", "为了加密", "为了指定 HTTP 方法"],
           answer: 1,
-          explain: "a2uiClientCapabilities 和 a2uiClientDataModel 都通过传输层的 metadata（如 A2A message metadata、HTTP header）携带。",
+          explain: "能力声明与数据模型都通过传输层的 metadata（如 A2A message metadata、HTTP header）携带：v0.9 中叫 a2uiClientCapabilities / a2uiClientDataModel，v1.0 改名为 a2uiRendererCapabilities / a2uiRendererDataModel。",
         },
         {
           q: "同一个 Text 组件，v0.8 与 v0.9 最明显的写法差异是？",
@@ -132,14 +136,29 @@ export default function EcosystemLesson() {
             </div>
           ))}
         </div>
-        <CodeBlock
-          title="A2A 中的元数据（示意）"
-          code={{
-            metadata: {
-              a2uiClientCapabilities: { supportedCatalogIds: ["https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"] },
-              a2uiClientDataModel: { version: "v0.9", surfaces: { booking: { booking: { guests: 3 } } } },
-            },
-          }}
+        <ByVersion
+          v09={
+            <CodeBlock
+              title="A2A 中的元数据（v0.9 示意）"
+              code={{
+                metadata: {
+                  a2uiClientCapabilities: { supportedCatalogIds: ["https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"] },
+                  a2uiClientDataModel: { version: "v0.9", surfaces: { booking: { booking: { guests: 3 } } } },
+                },
+              }}
+            />
+          }
+          v10={
+            <CodeBlock
+              title="A2A 中的元数据（v1.0 示意）"
+              code={{
+                metadata: {
+                  a2uiRendererCapabilities: { "v1.0": { supportedCatalogIds: ["https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"] } },
+                  a2uiRendererDataModel: { version: "v1.0", surfaces: { booking: { booking: { guests: 3 } } } },
+                },
+              }}
+            />
+          }
         />
       </Section>
 
@@ -158,19 +177,22 @@ export default function EcosystemLesson() {
             </div>
           ))}
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           <CodeBlock title="v0.8" code={V08} />
           <CodeBlock title="v0.9" code={V09} />
+          <CodeBlock title="v1.0" code={V10} />
         </div>
         <Callout tone="info" title="本站使用哪个版本？">
-          本站的渲染器实现的是 v0.9 / v0.9.1 与 basic catalog（组件属性以官方 <C>catalog.json</C> 为准），消息中的 <C>version</C> 可以是 <C>"v0.9"</C> 或 <C>"v0.9.1"</C>。
+          本站的渲染器同时实现了 v0.9 / v0.9.1 与 v1.0（各自的 basic catalog 以官方 <C>catalog.json</C> 为准），按消息中的 <C>version</C> 路由。
+          右上角的开关决定课程演示生成哪个版本的消息；两者的完整对比与 v1.0 新能力演示见{" "}
+          <Link to="/versions" className="underline underline-offset-2">版本对比</Link>。
         </Callout>
       </Section>
 
       <Section title="渲染器与工具" kicker="03 · 生态">
         <P>
           官方与社区已经提供了 Lit、Angular、Flutter、React 等框架的渲染器实现；A2UI 由 Google 发起，CopilotKit 与开源社区共同参与。
-          如果你的平台还没有渲染器，按规范自己实现一个也并不复杂——本站的渲染器（src/a2ui，含 catalog 元数据）约 2000 行 TypeScript，就是一个完整的例子。
+          如果你的平台还没有渲染器，按规范自己实现一个也并不复杂——本站的渲染器（src/a2ui，含 catalog 元数据）约 3000 行 TypeScript，同时支持 v0.9 与 v1.0，就是一个完整的例子。
         </P>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {LINKS.map((l) => (

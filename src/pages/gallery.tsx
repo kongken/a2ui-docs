@@ -2,12 +2,22 @@ import { useState } from "react"
 import { Braces } from "lucide-react"
 import { cn } from "cn"
 
-import { A2UISurface, BASIC_CATALOG, CATEGORY_LABEL, type ComponentCategory, type ComponentDef } from "@/a2ui"
+import {
+  A2UISurface,
+  BASIC_CATALOG,
+  BASIC_CATALOG_V1,
+  CATEGORY_LABEL,
+  convertSnippet,
+  type ComponentCategory,
+  type ComponentDef,
+} from "@/a2ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeBlock } from "@/components/learn/code-block"
 import { useDemo } from "@/components/learn/message-editor"
+import { VersionBadge } from "@/components/learn/version-note"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 import { bind, comps, create, data, fmt, text } from "@/lessons/msg"
 
 interface GalleryExample {
@@ -136,9 +146,19 @@ const EXAMPLES: Record<string, GalleryExample> = {
   },
 }
 
+/** v1.0 新增的属性，只在 v1.0 的示例中展示 */
+const V1_EXTRAS: Record<string, Record<string, Record<string, unknown>>> = {
+  TextField: { a: { placeholder: "请输入名字" } },
+  Slider: { root: { steps: 10 } },
+  Video: { root: { posterUrl: "https://picsum.photos/seed/poster/640/360" } },
+}
+
 function GalleryCard({ name }: { name: string }) {
-  const meta = BASIC_CATALOG.components[name]
-  const ex = EXAMPLES[name]
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
+  const meta = (v1 ? BASIC_CATALOG_V1 : BASIC_CATALOG).components[name]
+  const base = EXAMPLES[name]
+  const ex = v1 && V1_EXTRAS[name] ? { ...base, components: base.components.map((c) => ({ ...c, ...V1_EXTRAS[name][c.id] })) } : base
   const sid = `g-${name}`
   const a2ui = useDemo([create(sid), comps(sid, ex.components), ...(ex.data ? [data(sid, ex.data)] : [])])
   const [showJson, setShowJson] = useState(false)
@@ -161,7 +181,7 @@ function GalleryCard({ name }: { name: string }) {
         </Button>
       </div>
       <div className="min-h-24 rounded-lg border border-dashed p-3">{surface && <A2UISurface surface={surface} controller={a2ui.controller} />}</div>
-      {showJson && <CodeBlock code={ex.components} maxHeight={260} />}
+      {showJson && <CodeBlock code={ex.components.map((c) => convertSnippet(c, version))} maxHeight={260} />}
       <div className="flex flex-col divide-y rounded-lg border text-xs">
         {meta.props.map((p) => (
           <div key={p.name} className="flex flex-col gap-0.5 px-2.5 py-1.5">
@@ -181,16 +201,25 @@ function GalleryCard({ name }: { name: string }) {
 }
 
 export function GalleryPage() {
+  const { version } = useProtocolVersion()
   const [filter, setFilter] = useState<"all" | ComponentCategory>("all")
   const names = Object.keys(BASIC_CATALOG.components).filter((n) => filter === "all" || BASIC_CATALOG.components[n].category === filter)
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-8 pb-20 md:px-8">
       <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">组件画廊</h1>
+        <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight">
+          组件画廊 <VersionBadge version={version} className="h-6 text-xs" />
+        </h1>
         <p className="max-w-3xl text-muted-foreground">
-          basic catalog（v0.9）中的全部组件。每张卡片都由真实的 A2UI 消息渲染；属性依据官方 catalog.json 整理，<span className="text-destructive">*</span> 表示必填。
-          所有组件还共享 <span className="font-mono">id</span>、<span className="font-mono">accessibility</span>，以及在 Row/Column 中可用的 <span className="font-mono">weight</span>。
+          basic catalog（{version}）中的全部组件。每张卡片都由真实的 A2UI 消息渲染；属性依据官方 catalog.json 整理，<span className="text-destructive">*</span> 表示必填。
+          所有组件还共享 <span className="font-mono">id</span>、<span className="font-mono">accessibility</span>，以及在 Row/Column 中可用的 <span className="font-mono">weight</span>
+          {version === "v1.0" && (
+            <>
+              ；v1.0 中还可以带 <span className="font-mono">catalogId</span>（混用 catalog）与 <span className="font-mono">metadata</span>
+            </>
+          )}
+          。
         </p>
       </header>
       <ToggleGroup type="single" variant="outline" size="sm" value={filter} onValueChange={(v) => v && setFilter(v as typeof filter)} className="flex-wrap">

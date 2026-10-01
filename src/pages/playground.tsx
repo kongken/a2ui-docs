@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { ListPlus, Radio, RotateCcw, Send } from "lucide-react"
 
-import { parseMessages, TRAVEL_CATALOG_ID, useA2UI } from "@/a2ui"
+import { convertMessages, parseMessages, TRAVEL_CATALOG_ID, useA2UI, type ProtocolVersion } from "@/a2ui"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -16,7 +16,10 @@ import { Callout } from "@/components/learn/prose"
 import { C } from "@/components/learn/code-block"
 import { Inspector, InspectToggle, SurfacePreview } from "@/components/learn/inspector"
 import { JsonTextarea, pretty } from "@/components/learn/message-editor"
+import { VersionBadge } from "@/components/learn/version-note"
 import OFFICIAL from "@/data/official-examples.json"
+import OFFICIAL_V1 from "@/data/official-examples-v1.json"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 import { bind, comps, create, data, fmt, text, V } from "@/lessons/msg"
 
 interface Example {
@@ -72,24 +75,31 @@ const LOCAL: Example[] = [
   },
 ]
 
-const OFFICIAL_EXAMPLES: Example[] = (OFFICIAL as { file: string; name: string; description: string; messages: unknown[] }[]).map((e) => ({
-  key: `official:${e.file}`,
-  name: e.name,
-  description: e.description,
-  messages: e.messages,
-}))
+type RawExample = { file: string; name: string; description: string; messages: unknown[] }
 
-const ALL = [...LOCAL, ...OFFICIAL_EXAMPLES]
+/** 当前版本可用的示例：官方示例按版本分别打包，本站示例按需转换 */
+function examplesFor(version: ProtocolVersion) {
+  const official = ((version === "v1.0" ? OFFICIAL_V1 : OFFICIAL) as RawExample[]).map((e) => ({
+    key: `official:${e.file}`,
+    name: e.name,
+    description: e.description,
+    messages: e.messages,
+  }))
+  const local = LOCAL.map((e) => ({ ...e, messages: convertMessages(e.messages, version) }))
+  return { local, official, all: [...local, ...official] }
+}
 
-const surfaceIdOf = (ex: Example) =>
+const surfaceIdOf = (ex: { messages: unknown[] }) =>
   (ex.messages[0] as { createSurface?: { surfaceId: string } })?.createSurface?.surfaceId ?? "main"
 
 export function PlaygroundPage() {
+  const { version } = useProtocolVersion()
+  const [{ local: LOCAL_EXAMPLES, official: OFFICIAL_EXAMPLES, all: ALL }] = useState(() => examplesFor(version))
   const a2ui = useA2UI()
   const [exampleKey, setExampleKey] = useState("official:05_product-card.json")
   const example = ALL.find((e) => e.key === exampleKey) ?? ALL[0]
   const [text, setText] = useState(() => pretty(example.messages))
-  const [appendText, setAppendText] = useState(() => pretty([data(surfaceIdOf(example), "新的值", "/example")]))
+  const [appendText, setAppendText] = useState(() => pretty(convertMessages([data(surfaceIdOf(example), "新的值", "/example")], version)))
   const [error, setError] = useState<string | null>(null)
   const [inspect, setInspect] = useState(false)
 
@@ -108,7 +118,7 @@ export function PlaygroundPage() {
     setExampleKey(key)
     const src = pretty(ex.messages)
     setText(src)
-    setAppendText(pretty([data(surfaceIdOf(ex), "新的值", "/example")]))
+    setAppendText(pretty(convertMessages([data(surfaceIdOf(ex), "新的值", "/example")], version)))
     run(src, "reset")
   }
 
@@ -123,9 +133,11 @@ export function PlaygroundPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-8 pb-20 md:px-8">
       <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">Playground</h1>
+        <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight">
+          Playground <VersionBadge version={version} className="h-6 text-xs" />
+        </h1>
         <p className="max-w-3xl text-muted-foreground">
-          选择一个示例或自己编写 A2UI 消息（JSON 数组、JSONL 或 <C>{`{ "messages": [...] }`}</C> 均可）。“追加发送”不会重置状态，适合练习增量更新。
+          选择一个示例或自己编写 A2UI 消息（JSON 数组、JSONL 或 <C>{`{ "messages": [...] }`}</C> 均可）。“追加发送”不会重置状态，适合练习增量更新。渲染器同时支持 v0.9 与 v1.0，按每条消息的 version 处理；右上角的开关决定加载哪个版本的示例。
         </p>
       </header>
 
@@ -137,14 +149,14 @@ export function PlaygroundPage() {
           <SelectContent position="popper" className="max-h-96">
             <SelectGroup>
               <SelectLabel>本站示例</SelectLabel>
-              {LOCAL.map((e) => (
+              {LOCAL_EXAMPLES.map((e) => (
                 <SelectItem key={e.key} value={e.key}>
                   {e.name}
                 </SelectItem>
               ))}
             </SelectGroup>
             <SelectGroup>
-              <SelectLabel>官方示例（v0.9.1 basic catalog）</SelectLabel>
+              <SelectLabel>官方示例（{version === "v1.0" ? "v1.0" : "v0.9.1"} basic catalog）</SelectLabel>
               {OFFICIAL_EXAMPLES.map((e) => (
                 <SelectItem key={e.key} value={e.key}>
                   {e.name}

@@ -7,14 +7,18 @@ import {
   useRef,
 } from "react"
 
-import { resolveValue } from "./evaluate"
+import { convertMessages } from "./convert"
+import { resolveValue, stringify } from "./evaluate"
 import { processMessage } from "./processor"
 import { setAt } from "./pointer"
 import {
   EMPTY_STATE,
+  clientMessageKind,
   messageType,
   type ActionPayload,
+  type CallAgentFunctionPayload,
   type ClientMessage,
+  type ProtocolVersion,
   type Surface,
   type SurfacesState,
 } from "./types"
@@ -34,6 +38,8 @@ export interface LogEntry {
 export interface ActionEvent {
   name: string
   context?: Record<string, unknown>
+  /** v1.0 */
+  userMessage?: unknown
 }
 
 export interface A2UIController {
@@ -44,6 +50,8 @@ export interface A2UIController {
     event: ActionEvent,
     scope: string
   ): void
+  /** v1.0：渲染器找不到本地函数时请求 Agent 执行 */
+  callAgentFunction(surfaceId: string, key: string, callFunction: CallAgentFunctionPayload["callFunction"]): void
 }
 
 interface State {
@@ -54,7 +62,7 @@ interface State {
 
 type Act =
   | { type: "server"; messages: unknown[] }
-  | { type: "client"; message: ClientMessage; metadata?: unknown }
+  | { type: "client"; message: ClientMessage; metadata?: unknown; remoteKey?: string }
   | { type: "setData"; surfaceId: string; path: string; value: unknown }
   | { type: "reset" }
 
@@ -81,22 +89,35 @@ function reducer(state: State, act: Act): State {
         },
       }
     }
-    case "client":
+    case "client": {
+      let surfaces = state.surfaces
+      if ("callAgentFunction" in act.message && act.remoteKey) {
+        const call = act.message.callAgentFunction
+        const s = surfaces.surfaces[call.surfaceId]
+        if (s) {
+          surfaces = {
+            ...surfaces,
+            pendingCalls: { ...surfaces.pendingCalls, [call.functionCallId]: { surfaceId: call.surfaceId, key: act.remoteKey } },
+            surfaces: { ...surfaces.surfaces, [s.id]: { ...s, remote: { ...s.remote, [act.remoteKey]: { status: "pending" } } } },
+          }
+        }
+      }
       return {
-        ...state,
+        surfaces,
         seq: state.seq + 1,
         log: [
           ...state.log,
           {
             id: state.seq,
             dir: "up",
-            kind: "action" in act.message ? "action" : "error",
+            kind: clientMessageKind(act.message),
             payload: act.message,
             metadata: act.metadata,
             time: Date.now(),
           },
         ],
       }
+    }
     case "server": {
       let surfaces = state.surfaces
       let seq = state.seq
@@ -111,12 +132,12 @@ function reducer(state: State, act: Act): State {
           payload: msg,
           time: Date.now(),
         })
-        for (const error of result.errors) {
+        for (const reply of result.replies) {
           log.push({
             id: seq++,
             dir: "up",
-            kind: "error",
-            payload: { version: "v0.9", error },
+            kind: "error" in reply ? "error" : "rendererFunctionResponse",
+            payload: reply,
             time: Date.now(),
           })
         }
@@ -132,17 +153,23 @@ export interface UseA2UIOptions {
     action: ActionPayload,
     info: { surface: Surface; metadata?: unknown }
   ) => void
+  /** v1.0：渲染器请求 Agent 执行函数（callAgentFunction）时调用 */
+  onCallAgentFunction?: (call: CallAgentFunctionPayload, info: { surface: Surface }) => void
+  /** 设置后，send / stream 会把按 v0.9 编写的消息转换为该版本（课程演示用） */
+  convertTo?: ProtocolVersion
 }
 
 export function useA2UI(options: UseA2UIOptions = {}) {
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const stateRef = useRef(state)
-  const onActionRef = useRef(options.onAction)
+  const optionsRef = useRef(options)
   const timers = useRef<number[]>([])
+  const callSeq = useRef(0)
+  const target = options.convertTo
 
   useLayoutEffect(() => {
     stateRef.current = state
-    onActionRef.current = options.onAction
+    optionsRef.current = options
   })
 
   useEffect(
@@ -152,12 +179,21 @@ export function useA2UI(options: UseA2UIOptions = {}) {
     []
   )
 
-  const send = useCallback((messages: unknown | unknown[]) => {
+  /** 原样发送，不做版本转换 */
+  const sendRaw = useCallback((messages: unknown | unknown[]) => {
     dispatch({
       type: "server",
       messages: Array.isArray(messages) ? messages : [messages],
     })
   }, [])
+
+  const send = useCallback(
+    (messages: unknown | unknown[]) => {
+      const list = Array.isArray(messages) ? messages : [messages]
+      dispatch({ type: "server", messages: target ? convertMessages(list, target) : list })
+    },
+    [target]
+  )
 
   const cancelStream = useCallback(() => {
     timers.current.forEach(clearTimeout)
@@ -166,8 +202,9 @@ export function useA2UI(options: UseA2UIOptions = {}) {
 
   /** 模拟流式传输：逐条发送消息 */
   const stream = useCallback(
-    (messages: unknown[], interval = 600, onDone?: () => void) => {
+    (raw: unknown[], interval = 600, onDone?: () => void) => {
       cancelStream()
+      const messages = target ? convertMessages(raw, target) : raw
       messages.forEach((m, i) => {
         timers.current.push(
           window.setTimeout(() => {
@@ -177,7 +214,7 @@ export function useA2UI(options: UseA2UIOptions = {}) {
         )
       })
     },
-    [cancelStream]
+    [cancelStream, target]
   )
 
   const reset = useCallback(() => {
@@ -197,27 +234,39 @@ export function useA2UI(options: UseA2UIOptions = {}) {
         for (const [k, v] of Object.entries(event.context ?? {})) {
           context[k] = resolveValue(v, { data: surface.dataModel, scope })
         }
+        const v1 = surface.version === "v1.0"
         const action: ActionPayload = {
           name: event.name,
           surfaceId,
           sourceComponentId,
           timestamp: new Date().toISOString(),
           context,
+          ...(v1 && event.userMessage !== undefined
+            ? { userMessage: stringify(resolveValue(event.userMessage, { data: surface.dataModel, scope, version: "v1.0" })) }
+            : {}),
         }
+        // v0.9 称为 a2uiClientDataModel，v1.0 改名为 a2uiRendererDataModel
         const metadata = surface.sendDataModel
           ? {
-              a2uiClientDataModel: {
-                version: "v0.9",
+              [v1 ? "a2uiRendererDataModel" : "a2uiClientDataModel"]: {
+                version: v1 ? "v1.0" : "v0.9",
                 surfaces: { [surfaceId]: surface.dataModel },
               },
             }
           : undefined
         dispatch({
           type: "client",
-          message: { version: "v0.9", action },
+          message: { version: v1 ? "v1.0" : "v0.9", action },
           metadata,
         })
-        onActionRef.current?.(action, { surface, metadata })
+        optionsRef.current.onAction?.(action, { surface, metadata })
+      },
+      callAgentFunction(surfaceId, key, callFunction) {
+        const surface = stateRef.current.surfaces.surfaces[surfaceId]
+        if (!surface || surface.remote[key]) return
+        const payload: CallAgentFunctionPayload = { surfaceId, functionCallId: `call-${++callSeq.current}`, callFunction }
+        dispatch({ type: "client", message: { version: "v1.0", callAgentFunction: payload }, remoteKey: key })
+        optionsRef.current.onCallAgentFunction?.(payload, { surface })
       },
     }),
     []
@@ -228,6 +277,7 @@ export function useA2UI(options: UseA2UIOptions = {}) {
     surfaces: state.surfaces.order.map((id) => state.surfaces.surfaces[id]),
     log: state.log,
     send,
+    sendRaw,
     stream,
     cancelStream,
     reset,

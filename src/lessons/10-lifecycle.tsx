@@ -9,6 +9,7 @@ import { Inspector, SurfaceFrame } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
 import { useDemo } from "@/components/learn/message-editor"
 import { Callout, DataTable, P, Section } from "@/components/learn/prose"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, fmt, remove, text } from "./msg"
 
@@ -179,7 +180,7 @@ const PHASES = [
   { title: "流式发送组件", body: "updateComponents × N" },
   { title: "填充数据", body: "updateDataModel" },
   { title: "用户本地交互", body: "双向绑定，无网络请求" },
-  { title: "Action 回传", body: "客户端 → Agent" },
+  { title: "Action 回传", body: "→ Agent" },
   { title: "Agent 更新 / 删除", body: "updateDataModel · deleteSurface" },
 ]
 
@@ -381,6 +382,8 @@ function Avatar({ user }: { user?: boolean }) {
 }
 
 export default function LifecycleLesson() {
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
   return (
     <LessonShell
       slug="lifecycle"
@@ -433,7 +436,7 @@ export default function LifecycleLesson() {
             ["卡片列表", <C>{`List.children = { componentId: "r-card", path: "/restaurants" }`}</C>, "第 6 章：模板与相对路径"],
             ["点击预订", <C>↑ action select_restaurant</C>, "第 7 章：action 与 context"],
             ["填写表单", "（无消息）", "第 7 章：本地双向绑定；第 8 章：checks 禁用按钮"],
-            ["提交", <C>↑ action submit_booking（附带 a2uiClientDataModel）</C>, "第 7 章：sendDataModel"],
+            ["提交", <C>↑ action submit_booking（附带 {v1 ? "a2uiRendererDataModel" : "a2uiClientDataModel"}）</C>, "第 7 章：sendDataModel"],
             ["确认单", <C>deleteSurface × 2 → createSurface …</C>, "第 2 章：surface 生命周期；第 8 章：formatDate"],
             ["取消", <C>updateComponents + updateDataModel</C>, "第 3、5 章：按 ID / 按路径增量更新"],
           ]}

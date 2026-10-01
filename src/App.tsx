@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react"
+import { lazy, Suspense, useEffect, type ReactNode } from "react"
 import {
   HashRouter,
   Navigate,
@@ -11,6 +11,8 @@ import { ArrowUpRight } from "lucide-react"
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { VersionSwitch } from "@/components/version-switch"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -28,6 +30,9 @@ const PlaygroundPage = lazy(() =>
 )
 const GalleryPage = lazy(() =>
   import("@/pages/gallery").then((m) => ({ default: m.GalleryPage }))
+)
+const VersionsPage = lazy(() =>
+  import("@/pages/versions").then((m) => ({ default: m.VersionsPage }))
 )
 
 function PageFallback() {
@@ -50,6 +55,7 @@ function PageTitle() {
   const { pathname } = useLocation()
   if (pathname === "/playground") return <>Playground</>
   if (pathname === "/gallery") return <>组件画廊</>
+  if (pathname === "/versions") return <>版本对比 · v0.9 ↔ v1.0</>
   const slug = pathname.match(/^\/learn\/(.+)$/)?.[1]
   const idx = LESSONS.findIndex((l) => l.slug === slug)
   if (idx >= 0)
@@ -64,9 +70,16 @@ function PageTitle() {
 
 function LessonRoute() {
   const { slug = "" } = useParams()
+  const { version } = useProtocolVersion()
   const Page = LESSON_PAGES[slug]
   if (!Page) return <Navigate to="/" replace />
-  return <Page key={slug} />
+  // 切换版本时重新挂载，所有演示按新版本重建
+  return <Page key={`${slug}:${version}`} />
+}
+
+function Versioned({ children }: { children: (version: string) => ReactNode }) {
+  const { version } = useProtocolVersion()
+  return <>{children(version)}</>
 }
 
 export function App() {
@@ -100,6 +113,7 @@ export function App() {
                     a2ui.org <ArrowUpRight />
                   </a>
                 </Button>
+                <VersionSwitch />
                 <ThemeToggle />
               </div>
             </header>
@@ -109,8 +123,9 @@ export function App() {
                 <Routes>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/learn/:slug" element={<LessonRoute />} />
-                  <Route path="/playground" element={<PlaygroundPage />} />
-                  <Route path="/gallery" element={<GalleryPage />} />
+                  <Route path="/playground" element={<Versioned>{(v) => <PlaygroundPage key={v} />}</Versioned>} />
+                  <Route path="/gallery" element={<Versioned>{(v) => <GalleryPage key={v} />}</Versioned>} />
+                  <Route path="/versions" element={<VersionsPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Suspense>

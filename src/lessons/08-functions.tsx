@@ -1,13 +1,15 @@
 import { useState } from "react"
 import { cn } from "cn"
 
-import { interpolate } from "@/a2ui"
+import { convertSnippet, interpolate } from "@/a2ui"
 import { Input } from "@/components/ui/input"
 import { CodeBlock, C } from "@/components/learn/code-block"
 import { Inspector, SurfacePreview } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
 import { JsonTextarea, useDemo } from "@/components/learn/message-editor"
 import { Callout, DataTable, P, Section } from "@/components/learn/prose"
+import { VersionNote } from "@/components/learn/version-note"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, fmt, text } from "./msg"
 
@@ -35,6 +37,7 @@ const SAMPLE = {
 }
 
 function FormatPlayground() {
+  const { version } = useProtocolVersion()
   const [tpl, setTpl] = useState(PRESETS[1])
   const [src, setSrc] = useState(JSON.stringify(SAMPLE, null, 2))
   let model: Record<string, unknown> = {}
@@ -44,7 +47,7 @@ function FormatPlayground() {
   } catch (e) {
     err = (e as Error).message
   }
-  const out = err ? "" : interpolate(tpl, { data: model, scope: "" })
+  const out = err ? "" : interpolate(tpl, { data: model, scope: "", version })
 
   return (
     <DemoCard title="formatString 实验台" description="${…} 中可以写 JSON Pointer 路径，也可以调用 catalog 中的函数（参数必须具名）">
@@ -177,17 +180,20 @@ function ChecksDemo() {
 
 function FormatDemo() {
   const a2ui = useDemo(RECEIPT)
+  const { version } = useProtocolVersion()
   return (
     <DemoCard title="格式化函数" description="拖动滑块，观察 pluralize 如何按 CLDR 复数类别选择文案">
       <div className="grid gap-4 lg:grid-cols-2">
         <SurfacePreview a2ui={a2ui} />
-        <CodeBlock title="count 组件" code={(RECEIPT[1] as { updateComponents: { components: unknown[] } }).updateComponents.components[5]} />
+        <CodeBlock title="count 组件" code={convertSnippet((RECEIPT[1] as { updateComponents: { components: unknown[] } }).updateComponents.components[5], version)} />
       </div>
     </DemoCard>
   )
 }
 
 export default function FunctionsLesson() {
+  const { version } = useProtocolVersion()
+  const v1 = version === "v1.0"
   return (
     <LessonShell
       slug="functions"
@@ -198,9 +204,17 @@ export default function FunctionsLesson() {
         </>
       }
       takeaways={[
-        <>函数调用的形状是 <C>{`{ "call": 名字, "args": {…}, "returnType": … }`}</C>，参数本身也可以是路径或嵌套调用。</>,
+        v1 ? (
+          <>函数调用的形状是 <C>{`{ "call": 名字, "args": {…} }`}</C>（v1.0 不再在消息里写 returnType），参数本身也可以是路径或嵌套调用。</>
+        ) : (
+          <>函数调用的形状是 <C>{`{ "call": 名字, "args": {…}, "returnType": … }`}</C>，参数本身也可以是路径或嵌套调用。</>
+        ),
         <><C>formatString</C> 用 <C>{"${…}"}</C> 插值：路径、相对路径、具名参数的函数调用都可以；<C>{"\\${"}</C> 用于转义。</>,
-        <>输入组件和按钮可以声明 <C>checks</C>：每条规则是一个返回布尔值的条件 + 失败提示。</>,
+        v1 ? (
+          <>输入组件和按钮可以声明 <C>checks</C>：条件返回 <C>ValidationResult</C>（valid / message…），CheckRule 的 message 是兜底提示。</>
+        ) : (
+          <>输入组件和按钮可以声明 <C>checks</C>：每条规则是一个返回布尔值的条件 + 失败提示。</>
+        ),
         "按钮的任一 check 失败即自动禁用——表单逻辑完全在客户端即时生效，无需往返 Agent。",
       ]}
       quiz={[
@@ -228,16 +242,21 @@ export default function FunctionsLesson() {
           head={["类别", "函数", "返回"]}
           mono={[1]}
           rows={[
-            ["校验", "required · regex · length · numeric · email", "boolean"],
+            ["校验", "required · regex · length · numeric · email", v1 ? "ValidationResult" : "boolean"],
             ["格式化", "formatString · formatNumber · formatCurrency · formatDate · pluralize", "string"],
             ["逻辑", "and · or · not", "boolean"],
             ["本地动作", "openUrl", "void"],
+            ...(v1 ? [["内置（v1.0）", "@index", "number"]] : []),
           ]}
         />
         <CodeBlock
           title="一个函数调用"
-          code={{ call: "formatCurrency", args: { value: { path: "/order/total" }, currency: "CNY", decimals: 2 }, returnType: "string" }}
+          code={convertSnippet({ call: "formatCurrency", args: { value: { path: "/order/total" }, currency: "CNY", decimals: 2 }, returnType: "string" }, version)}
         />
+        <VersionNote when="v1.0" summary="FunctionCall 不再携带 returnType；新增内置函数 @index">
+          v1.0 中返回类型只在 catalog 的函数定义里声明，消息里不再写 <C>returnType</C>。内置的 <C>@index</C> 返回模板中当前元素的下标，
+          例如 <C>{"${@index(offset: 1)}"}</C> 生成 1、2、3……（只能在模板作用域内使用）。
+        </VersionNote>
       </Section>
 
       <Section title="formatString：字符串插值" kicker="02 · 动手">
@@ -256,6 +275,11 @@ export default function FunctionsLesson() {
           全部通过前按钮保持禁用。
         </P>
         <ChecksDemo />
+        <VersionNote when="v1.0" summary="校验函数返回 ValidationResult，而不只是 true / false">
+          v1.0 的 required、email 等函数返回 <C>{`{ "valid": false, "code": "…", "message": "…", "severity": "error" }`}</C>。
+          渲染器优先显示结果里的 message，CheckRule 上的 message 只作兜底；and / or / not 按 valid 参与运算。
+          自定义的校验函数甚至可以由 Agent 远程执行（见“版本对比”页的优惠码演示）。
+        </VersionNote>
         <CodeBlock
           title="按钮上的组合校验（节选）"
           code={{

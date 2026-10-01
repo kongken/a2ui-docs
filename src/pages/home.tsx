@@ -1,90 +1,16 @@
-import { useEffect, useRef, useState } from "react"
+import { lazy, Suspense } from "react"
 import { Link } from "react-router-dom"
-import { ArrowRight, CircleCheck, Clock, FlaskConical, LayoutGrid } from "lucide-react"
+import { ArrowRight, CircleCheck, Clock, FlaskConical, GitCompareArrows, LayoutGrid } from "lucide-react"
 import { cn } from "cn"
 
-import { A2UISurface, messageType, useA2UI } from "@/a2ui"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { SurfaceFrame } from "@/components/learn/inspector"
 import { useProgress } from "@/hooks/use-progress"
 import { LESSONS, LEVEL_STYLE, type Level } from "@/lessons/meta"
-import { bind, comps, create, data, fmt, text } from "@/lessons/msg"
 
-const S = "hero"
-const HERO = [
-  create(S, { theme: { agentDisplayName: "旅行助手" } }),
-  comps(S, [{ id: "root", component: "Card", child: "col" }, { id: "col", component: "Column", children: ["head", "info", "div", "actions"] }]),
-  comps(S, [
-    { id: "head", component: "Row", children: ["icon", "title"], align: "center" },
-    { id: "icon", component: "Icon", name: "event" },
-    text("title", bind("/trip/title"), "h4"),
-  ]),
-  comps(S, [text("info", fmt("${/trip/city} · ${/trip/days} 天 · 预算 ${formatCurrency(value:${/trip/budget}, currency:'CNY', decimals:0)}")), { id: "div", component: "Divider" }]),
-  data(S, { trip: { title: "京都 · 红叶季", city: "京都", days: 5, budget: 12000 } }),
-  comps(S, [
-    { id: "actions", component: "Row", children: ["ok", "edit"] },
-    { id: "ok", component: "Button", child: "ok-t", variant: "primary", action: { event: { name: "confirm_trip" } } },
-    text("ok-t", "确认行程"),
-    { id: "edit", component: "Button", child: "edit-t", variant: "borderless", action: { event: { name: "edit_trip" } } },
-    text("edit-t", "修改"),
-  ]),
-]
-
-function HeroDemo() {
-  const a2ui = useA2UI()
-  const [cursor, setCursor] = useState(0)
-  const cursorRef = useRef(0)
-  const { send, reset } = a2ui
-
-  useEffect(() => {
-    const tick = () => {
-      if (cursorRef.current >= HERO.length + 4) {
-        cursorRef.current = 0
-        reset()
-      } else if (cursorRef.current < HERO.length) {
-        send(HERO[cursorRef.current])
-      }
-      cursorRef.current += 1
-      setCursor(cursorRef.current)
-    }
-    reset()
-    const t = window.setInterval(tick, 900)
-    return () => clearInterval(t)
-  }, [send, reset])
-
-  const surface = a2ui.surfaces[0]
-  return (
-    <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-      <div className="flex min-w-0 flex-col gap-1 overflow-hidden rounded-xl border bg-muted/30 p-3">
-        <span className="mb-1 font-mono text-[10px] text-muted-foreground">agent → client · JSONL</span>
-        {HERO.map((m, i) => (
-          <div
-            key={i}
-            className={cn(
-              "truncate rounded px-1.5 py-1 font-mono text-[10.5px] transition-all duration-300",
-              i < cursor ? "bg-background opacity-100 shadow-xs" : "opacity-25",
-              i === cursor - 1 && "ring-1 ring-sky-500/60"
-            )}
-          >
-            <span className="font-semibold text-sky-700 dark:text-sky-300">{messageType(m)}</span>{" "}
-            <span className="text-muted-foreground">{JSON.stringify(Object.values(m)[1])}</span>
-          </div>
-        ))}
-      </div>
-      <div className="min-w-0">
-        {surface ? (
-          <SurfaceFrame surface={surface}>
-            <A2UISurface surface={surface} controller={a2ui.controller} />
-          </SurfaceFrame>
-        ) : (
-          <div className="h-full min-h-40 animate-pulse rounded-xl border border-dashed bg-muted/30" />
-        )}
-      </div>
-    </div>
-  )
-}
+// 首页的实时演示依赖整个渲染器，按需加载以减小首屏体积
+const HeroDemo = lazy(() => import("./home-hero"))
 
 const CONCEPTS = [
   { term: "Surface", desc: "一块由 Agent 控制的 UI 区域，有自己的组件与数据。", slug: "first-surface" },
@@ -114,7 +40,7 @@ export function HomePage() {
       <section className="grid items-center gap-10 lg:grid-cols-[1fr_1.1fr]">
         <div className="flex flex-col gap-5">
           <Badge variant="outline" className="w-fit font-mono text-[11px]">
-            A2UI v0.9.1 · 非官方中文学习站
+            A2UI v0.9 / v1.0 · 非官方中文学习站
           </Badge>
           <h1 className="text-4xl leading-tight font-bold tracking-tight md:text-5xl">
             让 Agent 安全地
@@ -146,7 +72,9 @@ export function HomePage() {
             </div>
           )}
         </div>
-        <HeroDemo />
+        <Suspense fallback={<div className="h-64 animate-pulse rounded-xl border border-dashed bg-muted/30" />}>
+          <HeroDemo />
+        </Suspense>
       </section>
 
       <section className="flex flex-col gap-6">
@@ -212,12 +140,12 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2">
+      <section className="grid gap-3 lg:grid-cols-3">
         <Link to="/playground" className="flex items-center gap-4 rounded-xl border p-5 transition-colors hover:bg-muted/50">
           <FlaskConical className="size-6" />
           <div className="flex flex-col">
             <span className="font-semibold">Playground</span>
-            <span className="text-sm text-muted-foreground">内置 43 个官方 v0.9.1 示例，随意编辑、流式或增量发送</span>
+            <span className="text-sm text-muted-foreground">内置 v0.9.1 与 v1.0 各 43 个官方示例，随意编辑、流式或增量发送</span>
           </div>
         </Link>
         <Link to="/gallery" className="flex items-center gap-4 rounded-xl border p-5 transition-colors hover:bg-muted/50">
@@ -227,11 +155,18 @@ export function HomePage() {
             <span className="text-sm text-muted-foreground">basic catalog 的 18 个组件：属性表 + 实时示例</span>
           </div>
         </Link>
+        <Link to="/versions" className="flex items-center gap-4 rounded-xl border p-5 transition-colors hover:bg-muted/50">
+          <GitCompareArrows className="size-6" />
+          <div className="flex flex-col">
+            <span className="font-semibold">版本对比 v0.9 ↔ v1.0</span>
+            <span className="text-sm text-muted-foreground">差异一览、迁移助手，以及双向 RPC 等 v1.0 新能力演示</span>
+          </div>
+        </Link>
       </section>
 
       <footer className="border-t pt-6 text-xs leading-6 text-muted-foreground">
         本站内容依据 <a className="underline" href="https://a2ui.org/" target="_blank" rel="noreferrer">a2ui.org</a> 公开文档与{" "}
-        <a className="underline" href="https://github.com/a2ui-project/a2ui" target="_blank" rel="noreferrer">A2UI v0.9.1 规范</a>（Apache 2.0）整理，
+        <a className="underline" href="https://github.com/a2ui-project/a2ui" target="_blank" rel="noreferrer">A2UI v0.9.1 / v1.0 规范</a>（Apache 2.0）整理，
         演示渲染器为独立实现，仅用于学习。A2UI 由 Google 发起。
       </footer>
     </div>

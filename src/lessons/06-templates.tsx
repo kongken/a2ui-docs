@@ -8,6 +8,7 @@ import { Inspector, InspectToggle, SurfacePreview } from "@/components/learn/ins
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
 import { useDemo } from "@/components/learn/message-editor"
 import { Callout, DataTable, P, Section } from "@/components/learn/prose"
+import { VersionNote } from "@/components/learn/version-note"
 
 import { bind, comps, create, data, fmt, text } from "./msg"
 
@@ -173,6 +174,11 @@ export default function TemplatesLesson() {
           而价格里用到的 <C>{"${/currency}"}</C> 是绝对路径。开启“显示组件边界”，每个实例旁会标出它的作用域（<C>@ /items/0</C>）。
         </P>
         <TemplateDemo />
+        <VersionNote when="v1.0" summary="模板中可以用 @index 取得当前下标">
+          v1.0 新增了内置函数 <C>@index</C>：在模板作用域中返回当前元素的 0 起下标，<C>offset</C> 参数可调整起点，
+          例如 <C>{`{"call": "formatString", "args": {"value": "#\${@index(offset: 1)}"}}`}</C> 显示 #1、#2…
+          在模板之外调用 @index 属于错误。
+        </VersionNote>
         <Callout tone="info" title="这是对 JSON Pointer 的扩展">
           RFC 6901 里的指针都必须以 <C>/</C> 开头。A2UI 为了支持模板，额外定义了“不以 / 开头的相对路径”，在集合作用域内解析。
         </Callout>

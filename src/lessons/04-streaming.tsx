@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react"
 import { Pause, Play, RotateCcw, StepForward } from "lucide-react"
 import { cn } from "cn"
 
-import { messageType, useA2UI, type A2UIHandle } from "@/a2ui"
+import { messageType, type A2UIHandle } from "@/a2ui"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeBlock, C } from "@/components/learn/code-block"
 import { InspectToggle, SurfacePreview, summarize } from "@/components/learn/inspector"
 import { DemoCard, LessonShell } from "@/components/learn/lesson-shell"
+import { useConverted, useVersionedA2UI } from "@/components/learn/message-editor"
 import { Bullets, Callout, P, Section } from "@/components/learn/prose"
+import { useProtocolVersion } from "@/hooks/use-protocol-version"
 
 import { bind, comps, create, data, fmt, text } from "./msg"
 
@@ -103,10 +105,11 @@ function usePlayer(a2ui: A2UIHandle, messages: unknown[]) {
 }
 
 function StreamDemo() {
-  const a2ui = useA2UI()
+  const a2ui = useVersionedA2UI()
   const [order, setOrder] = useState("topDown")
   const [inspect, setInspect] = useState(true)
-  const messages = ORDERS[order].messages
+  // 列表里展示当前版本的消息；发送时由 a2ui 再做一次（幂等的）转换
+  const messages = useConverted(ORDERS[order].messages)
   const p = usePlayer(a2ui, messages)
   const done = p.cursor >= messages.length
 
@@ -190,6 +193,8 @@ function StreamDemo() {
 }
 
 export default function StreamingLesson() {
+  const { version } = useProtocolVersion()
+  const v = version === "v1.0" ? "v1.0" : "v0.9"
   return (
     <LessonShell
       slug="streaming"
@@ -227,9 +232,9 @@ export default function StreamingLesson() {
         </P>
         <CodeBlock
           language="text"
-          code={`{"version":"v0.9","createSurface":{"surfaceId":"weather","catalogId":"…/basic/catalog.json"}}
-{"version":"v0.9","updateComponents":{"surfaceId":"weather","components":[{"id":"root","component":"Card","child":"main"}, …]}}
-{"version":"v0.9","updateDataModel":{"surfaceId":"weather","value":{"city":"杭州","now":{"temp":23}}}}
+          code={`{"version":"${v}","createSurface":{"surfaceId":"weather","catalogId":"…/basic/catalog.json"}}
+{"version":"${v}","updateComponents":{"surfaceId":"weather","components":[{"id":"root","component":"Card","child":"main"}, …]}}
+{"version":"${v}","updateDataModel":{"surfaceId":"weather","value":{"city":"杭州","now":{"temp":23}}}}
 …`}
         />
       </Section>

@@ -26,6 +26,7 @@ export function SurfaceFrame({ surface, children, className }: { surface: Surfac
           <span className="size-2 rounded-full bg-foreground/15" />
         </span>
         <span className="truncate font-mono text-[11px] text-muted-foreground">surface: {surface.id}</span>
+        <span className="font-mono text-[10px] text-muted-foreground/70">{surface.version}</span>
         {theme?.agentDisplayName && (
           <Badge variant="secondary" className="ml-auto gap-1 text-[10px]">
             {theme.primaryColor && <span className="size-2 rounded-full" style={{ background: theme.primaryColor }} />}
@@ -104,7 +105,8 @@ export function summarize(entry: LogEntry): string {
     }
     case "updateDataModel": {
       const u = p.updateDataModel
-      return `${u.path ?? "/"} ${"value" in u ? "= " + short(u.value) : "(删除)"}`
+      const del = !("value" in u) || (u.value === null && p.version === ("v1.0" as never))
+      return `${u.path ?? "/"} ${del ? ("value" in u ? "= null（删除）" : "（省略 value：删除）") : "= " + short(u.value)}`
     }
     case "deleteSurface":
       return `${p.deleteSurface.surfaceId}`
@@ -112,6 +114,16 @@ export function summarize(entry: LogEntry): string {
       return `${p.action.name} · ${short(p.action.context, 40)}`
     case "error":
       return `${p.error.code}: ${p.error.message}`
+    case "callAgentFunction":
+    case "callRendererFunction": {
+      const c = p[entry.kind] as { functionCallId?: string; callFunction?: { call?: string; args?: unknown } }
+      return `${c.callFunction?.call}(${c.callFunction?.args ? short(c.callFunction.args, 30) : ""}) · ${c.functionCallId}`
+    }
+    case "agentFunctionResponse":
+    case "rendererFunctionResponse": {
+      const r = p[entry.kind] as { functionCallId?: string; value?: unknown; error?: { code: string } }
+      return `${r.functionCallId} → ${r.error ? r.error.code : short(r.value, 40)}`
+    }
     default:
       return short(entry.payload)
   }
@@ -174,10 +186,10 @@ export function LogLegend() {
   return (
     <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
       <span className="flex items-center gap-1">
-        <ArrowDown className="size-3 text-sky-600" /> Agent → 客户端
+        <ArrowDown className="size-3 text-sky-600" /> Agent → 渲染器
       </span>
       <span className="flex items-center gap-1">
-        <ArrowUp className="size-3 text-orange-600" /> 客户端 → Agent
+        <ArrowUp className="size-3 text-orange-600" /> 渲染器 → Agent
       </span>
     </div>
   )
